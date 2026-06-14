@@ -16,21 +16,17 @@
 
 PYTHON_PATH := $(shell which python)
 
-# If uv is installed and a virtual environment exists, use it
+# If uv is installed and a virtual environment exists, use it.
 UV_CHECK := $(shell command -v uv)
 ifneq ($(UV_CHECK),)
+ifneq ($(wildcard .venv/bin/python),)
 	PYTHON_PATH := $(shell .venv/bin/python)
+endif
 endif
 
 export PATH := $(dir $(PYTHON_PATH)):$(PATH)
 
 DEVICE ?= cpu
-
-build-user:
-	docker build -f docker/Dockerfile.user -t lerobot-user .
-
-build-internal:
-	docker build -f docker/Dockerfile.internal -t lerobot-internal .
 
 test-end-to-end:
 	${MAKE} DEVICE=$(DEVICE) test-act-ete-train

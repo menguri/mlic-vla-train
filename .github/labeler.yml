@@ -16,7 +16,6 @@ CI:
   - changed-files:
       - any-glob-to-any-file:
         - '.github/**'
-        - 'docker/**'
 
 github_actions:
   - changed-files:

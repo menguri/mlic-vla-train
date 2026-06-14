@@ -81,6 +81,7 @@ coverage.xml
 ### Logs & Temporary Files ###
 logs/
 tmp/
+tmp_dataset_check/
 *.log
 pip-log.txt
 pip-delete-this-directory.txt
@@ -176,3 +177,50 @@ outputs/
 *.urdf
 *.xml
 *.part
+
+### Local Lab Assets (do not commit) ###
+# Large model snapshots and checkpoints
+models/
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+
+# Local robot datasets and generated merged datasets
+collected_demo/data/
+collected_demo/merged/
+collected_demo/**/*.parquet
+collected_demo/**/*.mp4
+collected_demo/**/*.avi
+collected_demo/**/*.mkv
+collected_demo/**/*.webm
+collected_demo/**/*.npy
+collected_demo/**/*.npz
+collected_demo/**/*.h5
+collected_demo/**/*.hdf5
+collected_demo/**/meta/
+!collected_demo/README.md
+
+# Evaluation/training artifacts
+eval_logs/
+training-runs/
+checkpoints/
+
+# Local Hugging Face cache/materialized downloads
+.hf_cache/
+hf_cache/
+
+# Media generated from local evals or robot runs
+*.mp4
+*.avi
+*.mkv
+*.webm
+# Small curated README demos are allowed in the repo.
+!media/readme/eval_episode_4.mp4
+!media/readme/eval_episode_6.mp4
+
+# Local secret/env helpers
+.env_libero
+env_libero.local.sh

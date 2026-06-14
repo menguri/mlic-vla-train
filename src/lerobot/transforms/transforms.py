@@ -144,6 +144,105 @@ class SharpnessJitter(Transform):
         return self._call_kernel(F.adjust_sharpness, inpt, sharpness_factor=sharpness_factor)
 
 
+class GammaJitter(Transform):
+    """Randomly change image gamma without shifting hue."""
+
+    def __init__(self, gamma: float | Sequence[float], gain: float = 1.0) -> None:
+        super().__init__()
+        self.gamma = self._check_input(gamma)
+        self.gain = gain
+
+    def _check_input(self, gamma):
+        if isinstance(gamma, (int | float)):
+            if gamma <= 0:
+                raise ValueError("If gamma is a single number, it must be positive.")
+            gamma = [max(1e-6, 1.0 - gamma), 1.0 + gamma]
+        elif isinstance(gamma, collections.abc.Sequence) and len(gamma) == 2:
+            gamma = [float(v) for v in gamma]
+        else:
+            raise TypeError(f"{gamma=} should be a single number or a sequence with length 2.")
+
+        if not 0.0 < gamma[0] <= gamma[1]:
+            raise ValueError(f"gamma values should be in (0., inf), but got {gamma}.")
+
+        return float(gamma[0]), float(gamma[1])
+
+    def make_params(self, flat_inputs: list[Any]) -> dict[str, Any]:
+        gamma = torch.empty(1).uniform_(self.gamma[0], self.gamma[1]).item()
+        return {"gamma": gamma}
+
+    def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
+        return self._call_kernel(F.adjust_gamma, inpt, gamma=params["gamma"], gain=self.gain)
+
+
+class GaussianNoise(Transform):
+    """Add weak zero-mean image noise to tensor images."""
+
+    def __init__(self, std: float | Sequence[float]) -> None:
+        super().__init__()
+        self.std = self._check_input(std)
+
+    def _check_input(self, std):
+        if isinstance(std, (int | float)):
+            std = [0.0, float(std)]
+        elif isinstance(std, collections.abc.Sequence) and len(std) == 2:
+            std = [float(v) for v in std]
+        else:
+            raise TypeError(f"{std=} should be a single number or a sequence with length 2.")
+
+        if not 0.0 <= std[0] <= std[1]:
+            raise ValueError(f"std values should be between 0 and inf, but got {std}.")
+
+        return float(std[0]), float(std[1])
+
+    def make_params(self, flat_inputs: list[Any]) -> dict[str, Any]:
+        std = torch.empty(1).uniform_(self.std[0], self.std[1]).item()
+        return {"std": std}
+
+    def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
+        if not isinstance(inpt, torch.Tensor):
+            return inpt
+        if params["std"] == 0:
+            return inpt
+        if inpt.is_floating_point():
+            return (inpt + torch.randn_like(inpt) * params["std"]).clamp(0.0, 1.0)
+        noise = torch.randn_like(inpt.float()) * params["std"] * 255.0
+        return (inpt.float() + noise).clamp(0, 255).to(inpt.dtype)
+
+
+class CompressionJitter(Transform):
+    """Approximate weak compression artifacts with per-image value quantization."""
+
+    def __init__(self, levels: int | Sequence[int]) -> None:
+        super().__init__()
+        self.levels = self._check_input(levels)
+
+    def _check_input(self, levels):
+        if isinstance(levels, int):
+            levels = [levels, levels]
+        elif isinstance(levels, collections.abc.Sequence) and len(levels) == 2:
+            levels = [int(v) for v in levels]
+        else:
+            raise TypeError(f"{levels=} should be an int or a sequence with length 2.")
+
+        if not 2 <= levels[0] <= levels[1]:
+            raise ValueError(f"levels should be between 2 and inf, but got {levels}.")
+
+        return int(levels[0]), int(levels[1])
+
+    def make_params(self, flat_inputs: list[Any]) -> dict[str, Any]:
+        levels = torch.randint(self.levels[0], self.levels[1] + 1, (1,)).item()
+        return {"levels": levels}
+
+    def transform(self, inpt: Any, params: dict[str, Any]) -> Any:
+        if not isinstance(inpt, torch.Tensor):
+            return inpt
+        levels = params["levels"]
+        if inpt.is_floating_point():
+            return (torch.round(inpt.clamp(0.0, 1.0) * levels) / levels).to(inpt.dtype)
+        return (torch.round(inpt.float() / 255.0 * levels) / levels * 255.0).clamp(0, 255).to(inpt.dtype)
+
+
 @dataclass
 class ImageTransformConfig:
     """
@@ -216,8 +315,14 @@ class ImageTransformsConfig:
 
 
 def make_transform_from_config(cfg: ImageTransformConfig):
-    if cfg.type == "SharpnessJitter":
-        return SharpnessJitter(**cfg.kwargs)
+    custom_transforms = {
+        "SharpnessJitter": SharpnessJitter,
+        "GammaJitter": GammaJitter,
+        "GaussianNoise": GaussianNoise,
+        "CompressionJitter": CompressionJitter,
+    }
+    if cfg.type in custom_transforms:
+        return custom_transforms[cfg.type](**cfg.kwargs)
 
     transform_cls = getattr(v2, cfg.type, None)
     if isinstance(transform_cls, type) and issubclass(transform_cls, Transform):
@@ -225,7 +330,7 @@ def make_transform_from_config(cfg: ImageTransformConfig):
 
     raise ValueError(
         f"Transform '{cfg.type}' is not valid. It must be a class in "
-        f"torchvision.transforms.v2 or 'SharpnessJitter'."
+        f"torchvision.transforms.v2 or one of {sorted(custom_transforms)}."
     )
 
 

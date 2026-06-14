@@ -384,6 +384,43 @@ class SmolVLAPolicy(PreTrainedPolicy):
         losses = losses[:, :, :original_action_dim]
         loss_dict["losses_after_forward"] = losses.clone().mean().item()
 
+        with torch.no_grad():
+            detached_losses = losses.detach()
+            detached_actions = actions[:, :, :original_action_dim].detach()
+            if actions_is_pad is None:
+                valid_mask = torch.ones(
+                    detached_losses.shape[:2], dtype=torch.bool, device=detached_losses.device
+                )
+            else:
+                valid_mask = ~actions_is_pad
+
+            expanded_valid_mask = valid_mask.unsqueeze(-1)
+            valid_loss_values = detached_losses[expanded_valid_mask.expand_as(detached_losses)]
+            loss_dict["flow_mse/mean"] = valid_loss_values.mean().item() if valid_loss_values.numel() else 0.0
+            loss_dict["flow_rmse/mean"] = (
+                valid_loss_values.mean().sqrt().item() if valid_loss_values.numel() else 0.0
+            )
+
+            flow_abs_error = detached_losses.sqrt()
+            valid_flow_abs_error = flow_abs_error[expanded_valid_mask.expand_as(flow_abs_error)]
+            if valid_flow_abs_error.numel():
+                loss_dict["flow_within_0.10"] = (valid_flow_abs_error < 0.10).float().mean().item()
+                loss_dict["flow_within_0.25"] = (valid_flow_abs_error < 0.25).float().mean().item()
+                loss_dict["flow_within_0.50"] = (valid_flow_abs_error < 0.50).float().mean().item()
+
+            dim_names = ["x", "y", "z", "roll", "pitch", "yaw", "gripper"]
+            valid_count = valid_mask.sum().clamp_min(1).to(detached_losses.dtype)
+            per_dim_loss = (detached_losses * expanded_valid_mask).sum(dim=(0, 1)) / valid_count
+            action_valid = detached_actions[expanded_valid_mask.expand_as(detached_actions)].view(-1, original_action_dim)
+            for dim_idx in range(original_action_dim):
+                dim_name = dim_names[dim_idx] if dim_idx < len(dim_names) else f"dim_{dim_idx}"
+                loss_dict[f"flow_mse/{dim_name}"] = per_dim_loss[dim_idx].item()
+                if action_valid.numel():
+                    dim_actions = action_valid[:, dim_idx]
+                    loss_dict[f"action_target_mean/{dim_name}"] = dim_actions.mean().item()
+                    loss_dict[f"action_target_std/{dim_name}"] = dim_actions.std(unbiased=False).item()
+                    loss_dict[f"action_target_abs_mean/{dim_name}"] = dim_actions.abs().mean().item()
+
         if actions_is_pad is not None:
             in_episode_bound = ~actions_is_pad
             losses = losses * in_episode_bound.unsqueeze(-1)
